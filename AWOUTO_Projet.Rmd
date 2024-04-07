@@ -1,0 +1,663 @@
+---
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+---
+
+  
+```{=tex}
+\includepdf{PAGE DE GARDE TP_R.pdf}
+\setcounter{tocdepth}{4}        
+\renewcommand{\contentsname}{\textcolor{blue}{Table des Matières}}
+```
+\textcolor{black}{\tableofcontents} \newpage
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, error = FALSE,message = FALSE)
+```
+
+
+
+
+```{r}
+
+# les packages à installer 
+
+#install.packages("gtsummary")
+#install.packages("janitor")
+#install.packages("ggplot2")
+#install.packages("webshot")
+#install.packages("readxl")
+#install.packages("gridExtra")
+#install.packages("ggExtra")
+#install.packages("flextable")
+```
+
+```{r}
+library(gtsummary)
+library(janitor)
+library(dplyr)
+library(gt)
+library(ggplot2)
+library(flextable)
+#library(htmlwidgets)
+library(webshot)
+library(readxl)
+library(knitr)
+library(lubridate)
+library(gridExtra)
+library(ggExtra)
+```
+
+# 1. Partie 1
+
+## 1.1. Préparation des données
+
+### 1.1.1. Importation et mise en forme
+
+#### 1.1.1.1. Importation de la base
+
+```{r}
+library(readxl)
+getwd()
+projet <- read_excel("Base_Projet.xlsx")
+```
+#### 1.1.1.2. Nombre de lignes et de colonnes de la base projet
+
+```{r}
+nb_lignes <- nrow(projet)
+nb_colonnes <- ncol(projet)
+cat("Nombre de lignes (PME) :", nb_lignes, "\n")
+cat("Nombre de colonnes (variables) :", nb_colonnes, "\n")
+```
+
+
+#### 1.1.1.3. Vérification des valeurs manquantes pour la variable key dans la base projet
+
+```{r}
+if (any(is.na(projet$key))) {
+  cat("Il y a des valeurs manquantes pour la variable 'key'.\n")
+  # Identifier les lignes avec des valeurs manquantes pour 'key'
+  pme_manquantes <- projet$key[is.na(projet$key)]
+  cat("Les PME concernées sont :", paste(pme_manquantes, collapse = ", "), "\n")
+} else {
+  cat("Il n'y a pas de valeurs manquantes pour la variable 'key'.\n")
+  
+}
+```
+
+     De ce qui précède, on est certain que chaque les individus 
+     de la base de  données possède  un identifiant
+
+
+### 1.1.2. Création de variables
+
+#### 1.1.2.1. Renommage
+```{r}
+library(dplyr)
+
+
+projet <- projet %>%
+  dplyr::rename(region = q1,
+         departement = q2,
+         sexe = q23)
+```
+
+
+```{r}
+# Création d'une base de donnée alternative pour préserver la bse initiale
+Projet <- projet
+```
+
+
+#### 1.1.2.2. Création de  la variable sexe_2
+```{r}
+projet <- projet %>%
+  mutate(sexe_2 = factor(case_when(sexe == "Femme" ~ 1, TRUE ~ 0)))
+
+# Créer un data.frame nommé langues
+langues <- data.frame(projet %>%
+  select(key, starts_with("q24a_")))
+  
+```
+
+#### 1.1.2.3.Créeation d'une variable nommée "parle" 
+
+```{r}
+langue <- langues %>%
+  mutate(parle = rowSums(select(langues, starts_with("q24a_"))))
+```
+
+
+#### 1.1.2.3.Sélectionn exclusive des variables "key" et "parle"
+
+```{r}
+langues <- langue %>%
+  select(key, parle)
+
+# Fusionner les data.frames projet et langues
+projet <- left_join(projet, langues, by = "key")
+
+```
+
+# 2. Statistiques Descriptives 
+  
+
+## 2.1. Création des fonction
+
+#### 2.1.1. première fonction univariée
+
+  
+  Cette fonction permet de générer des tableuax d'une variables donnée dans une base de données
+
+```{r}
+library(knitr)
+library(kableExtra)
+
+univarie_1 <- function(variable, base_de_donnees = "") {
+  # Calculer la fréquence absolue
+  freq_absolue <- table(variable)
+  
+  # Calculer la fréquence relative avec deux chiffres après la virgule
+  freq_relative <- round(prop.table(freq_absolue), 2)
+  
+  # Créer le tableau de distribution
+  tableau <- data.frame(Modalités = as.character(names(freq_absolue)),
+                        Effectif = as.vector(freq_absolue),
+                        Fréquence = as.vector(freq_relative))
+  
+  # Calculer le total des fréquences absolues
+  total_freq_absolue <- sum(freq_absolue)
+  
+  # Ajouter la ligne du total
+  total_row <- c("Total", total_freq_absolue, 1)
+  tableau <- rbind(tableau, total_row)
+  
+  # Afficher le tableau de distribution avec kableExtra
+  knitr::kable(tableau, align = "c", caption = "Tableau de distribution des fréquences") %>%
+    kable_styling(bootstrap_options = "striped", full_width = FALSE) %>%
+    add_header_above(c(" ", "Fréquences" = 2)) %>%
+    row_spec(nrow(tableau), bold = TRUE)
+}
+
+```
+
+
+
+#### 2.1.1.deuxième fonction univariée
+
+Cette fonction permet de générer un graphque en barre ou un diagramme circulaire en fonction de l'option qu'aurait chosis l'utilisateu. On a en effet l'option barreet l'option *cercle*(diagramme circulaire) et *barre*(diagramme en barre)
+
+
+
+```{r}
+library(ggplot2)
+
+univarié_graphique<- function(variable, type_graphique = "barres") {
+  # Calculer la fréquence absolue
+  freq_absolue <- table(variable)
+  
+  # Calculer la fréquence relative en pourcentage avec deux chiffres après la virgule
+  freq_relative <- prop.table(freq_absolue) * 100
+  
+  # Créer un dataframe à partir des fréquences absolues et relatives
+  df <- data.frame(Modalité = as.character(names(freq_absolue)),
+                   Fréquence_Absolue = as.vector(freq_absolue),
+                   Fréquence_Relative = as.vector(freq_relative))
+  
+  # Formatage des fréquences relatives avec deux chiffres après la virgule
+  df$Fréquence_Relative <- paste0(format(round(df$Fréquence_Relative, 2), nsmall = 2), "%")
+  
+  # Créer le graphique en barres avec des couleurs variées
+  if (type_graphique == "barres") {
+    ggplot(df, aes(x = Modalité, y = Fréquence_Absolue, fill = Modalité)) +
+      geom_bar(stat = "identity") +
+      geom_text(aes(label = Fréquence_Relative), vjust = -0.5, size = 3) + # Ajout des fréquences relatives
+      labs(title = "Graphique en Barres", x = "Modalité", y = "Fréquence Absolue") +
+      theme_minimal() +
+      scale_fill_hue(name = "Modalité")
+  } else if (type_graphique == "cercle") {
+    # Créer le graphique circulaire avec des couleurs variées
+    ggplot(df, aes(x = "", y = Fréquence_Relative, fill = Modalité)) +
+      geom_bar(stat = "identity", width = 1) +
+      geom_text(aes(label = Fréquence_Relative), position = position_stack(vjust = 0.5), size = 3) + # Ajout des fréquences relatives
+      coord_polar("y", start = 0) +
+      labs(title = "Graphique Circulaire", fill = "Modalité") +
+      theme_minimal() +
+      theme(axis.title.x=element_blank(),
+            axis.text.x=element_blank(),
+            axis.ticks.x=element_blank()) +
+      scale_fill_hue(name = "Modalité")
+  } else {
+    cat("Type de graphique non reconnu. Veuillez spécifier 'barres' ou 'cercle'.")
+  }
+}
+
+# Exemple d'utilisation
+donnees <- c("A", "A", "B", "C", "C", "C", "D")
+univarié_graphique(donnees, type_graphique = "cercle")
+
+```
+
+
+
+#### 2.1.3. Création de la fonction bivariée
+
+la fonction bivariée est nommée tableau_croise et prend en argument deux variables ,puis retourne un *tableau croisé*
+```{r}
+### fonction bivariée: Fonction pour calculer les statistiques usuelles d'une variable quantitative
+tableau_croise <- function(var1, var2) {
+  # Calcul du tableau croisé
+  tab <- table(var1, var2)
+  
+  # Ajout des totaux par ligne et par colonne
+  tab_with_totals <- addmargins(tab, 1, FUN = list(Total = sum))
+  tab_with_totals <- addmargins(tab_with_totals, 2, FUN = list(Total = sum))
+  
+  # Renommer les dimensions pour une meilleure lisibilité
+  dimnames(tab_with_totals)[[1]][dim(tab_with_totals)[1]] <- "Total"
+  dimnames(tab_with_totals)[[2]][dim(tab_with_totals)[2]] <- "Total"
+  
+  return(tab_with_totals)
+  
+  
+
+}
+
+```
+
+
+
+#### 2.1.4. LA REPARTITION DES PROPORTION SUIVANTS LES VARIABLES DONNES
+
+   
+
+##### 2.1.4.0 Recodage de certaines variables d'intérêt
+    Dans cette partie nous avons trouvé judicuex de renommer les variables avec des     noms familiers pour uen lecture facile des statsitiques qui seront générées.
+    
+```{r}
+#recodons les variables importantes:
+# Renommer les variables q1, q2 et q23
+projet <- projet %>%
+  dplyr::rename(	"Niveau d’instruction" = q25,
+                   "Statut juridique" =q12,
+                  "propriétaire ou locataire" = q81)
+
+```
+
+##### 2.1.4.1 Repartition des PME selon le sexe
+```{r}
+
+# repartition du sexe 
+univarie_1(projet$sexe, projet)
+univarié_graphique(projet$sexe , "barres")
+```
+
+
+
+Du graphique ci-dessus , on note que les femmes sont les personnes les plus nombresues dans l'échantillon prise pour les études soit 76% des PME contre 24% pour les hommes
+
+##### 2.1.4.2 Repartition des PME selon le Niveau d’instruction
+```{r}
+univarie_1(projet$`Niveau d’instruction`, projet)
+univarié_graphique(projet$`Niveau d’instruction` , "cercle")
+```
+
+
+De ce graphique on retient essentiellement que les propriétaires des plantations ou des champs n'ont pas en général pas pu effectuer des études secondaires contre seulement 16% qui ont pu entamer un au moins un pas  à l'université
+
+
+
+
+##### 2.1.4.3 Repartition des PME selon le propriétaire/locataire
+```{r}
+univarie_1(projet$`propriétaire ou locataire`, projet)
+univarié_graphique(projet$`propriétaire ou locataire` , "cercle")
+```
+
+
+
+
+Comme on pouvait l'attendre les PME( soit 90%) possèdent les surfaces cultivées où ils travaiillent. 
+
+##### 2.1.4.5 Repartition des PME selon le Statut juridique le statut juridique et le sexe
+```{r}
+tableau_croise(projet$`Statut juridique`, projet$sexe)
+
+```
+
+##### 2.1.4.6 Repartition des PME selon la variable Propriétaire/locataire suivant le sexe
+```{r}
+tableau_croise(projet$`propriétaire ou locataire`, projet$sexe)
+
+```
+
+
+##### 2.1.4.8 Repartition des PME selon le Statut juridique et le sexe
+```{r}
+tableau_croise(projet$`Statut juridique`, projet$sexe)
+
+```
+
+## 2.2. Statistiques descriptives sur les autres variables 
+
+### 2.2.1 Création d'une variable nommée filiere: Celle ci donne la culture principale des PME
+```{r}
+projet <- Projet %>% mutate(filiere = if_else(filiere_1 ==1, 
+                  "Arachide",if_else(filiere_2 ==1, 
+                  "Anarchade",if_else(filiere_3 ==1, 
+                  "Mangue",if_else(filiere_4 ==1,"Riz","")))))
+# On crée là le nombre de filière pour chaque PME en faisant la somme des 
+#           variables filières
+projet <- projet %>% mutate(nb_filiere = filiere_1 + filiere_2 + filiere_3 + filiere_4)
+
+# On affiche la répartiton des PME par nbre de filière avec gtsummary
+tableau_1 <- projet["nb_filiere"]%>%
+  tbl_summary(label = nb_filiere ~ "Nombre de filière",
+  )
+tableau_1
+```
+### 2.2.2# Créons une fonction pour les tableaux croisés par filière et sexe
+
+  # Ici aussi pour faire analyser la variable sexe par filière d'activité , nous avons procéder à l'élaborationdes tableaux gtsummary avec strate.Par suite , nous avons décidé de définir une fonction qui facilitera les sorties des résultats sur chaque filière. L'objectif
+ est de fusionner en lignes le tableau créer ppur chaque variable par filière et ensuite merger en colonne pour les filières. 
+
+```{r}
+
+theme_gtsummary_compact(set_theme = TRUE, font_size = NULL)
+      #Créons une fonction pour les tableaux croisés par filière et sexe
+
+
+tabl_fil =function(base_donnee, num_var_filiere_, nom_filiere,lab_var,num_var){
+
+                         ### TABLEAU CROISE
+  
+  tableau <- base_donnee %>%
+  dplyr::select(sexe, q25, q12, q81, names(base_donnee[num_var_filiere_]) 
+                ) %>%
+  gtsummary::tbl_strata(
+    strata = names(base_donnee[num_var_filiere_]),
+    .tbl_fun = ~ .x %>%
+      gtsummary::tbl_cross(
+        row = names(base_donnee[num_var]),
+        col = sexe,
+        percent = "cell",
+        margin = NULL,
+        #statistic = ~ "{p}% ({n})",
+        #digits = ~ 2,
+        label = list(names(base_donnee[num_var]) ~ as.character(lab_var),
+                     sexe ~ "sexe du responsable")
+        ) %>% add_p() %>%
+      bold_labels() %>%
+      italicize_levels(),
+    
+    ## préciser comment combiner les tableaux de chaque groupe. Par défaut, 
+    ## il combine avec "tbl_merge"
+    .combine_with = "tbl_merge", 
+    .header = "{strata}"
+    )%>%
+    ## mise en forme de l'entête du tableau
+   modify_header(
+      list(
+        all_stat_cols(stat_0 = FALSE) ~ "**{level}** (n={n}, {style_percent(p)}%)"
+      )
+     ) %>% 
+    modify_column_hide(c(stat_1_1,stat_2_1,p.value_1))
+  return(tableau)
+}
+
+tab_prop_1 <- tabl_fil(projet,23,"Arachide","Propriétaire/Locataire",
+                       which(names(projet)=="q81"))
+tab_niv_1 <- tabl_fil(projet,23,"Arachide","Niveau d'instruction",
+                      which(names(projet)=="q25"))
+tab_stat_1 <- tabl_fil(projet,23,"Arachide","Statut juridique",
+                       which(names(projet)=="q81"))
+
+tab_fil_1 <- gtsummary::tbl_stack(list(tab_prop_1, tab_niv_1,tab_stat_1))
+
+
+tab_prop_2 <- tabl_fil(projet,24,"Anarchade","Propriétaire/Locataire",
+                       which(names(projet)=="q81"))
+tab_niv_2 <- tabl_fil(projet,24,"Anarchade","Niveau d'instruction",
+                      which(names(projet)=="q25"))
+tab_stat_2 <- tabl_fil(projet,24,"Anarchade","Statut juridique",
+                       which(names(projet)=="q81"))
+
+tab_fil_2 <- gtsummary::tbl_stack(list(tab_prop_2, tab_niv_2,tab_stat_2))
+
+
+tab_prop_3 <- tabl_fil(projet,25,"Arachide","Propriétaire/Locataire",
+                       which(names(projet)=="q81"))
+tab_niv_3 <- tabl_fil(projet,25,"Arachide","Niveau d'instruction",
+                      which(names(projet)=="q25"))
+tab_stat_3 <- tabl_fil(projet,25,"Arachide","Statut juridique",
+                       which(names(projet)=="q81"))
+
+tab_fil_3 <- gtsummary::tbl_stack(list(tab_prop_3, tab_niv_3,tab_stat_3))
+
+tab_prop_4 <- tabl_fil(projet,26,"Arachide","Propriétaire/Locataire",
+                       which(names(projet)=="q81"))
+tab_niv_4 <- tabl_fil(projet,26,"Arachide","Niveau d'instruction",
+                      which(names(projet)=="q25"))
+tab_stat_4 <- tabl_fil(projet,26,"Arachide","Statut juridique",
+                       which(names(projet)=="q81"))
+
+tab_fil_4 <- gtsummary::tbl_stack(list(tab_prop_4, tab_niv_4,tab_stat_4))
+
+tab_crois <- gtsummary::tbl_merge(
+  list(tab_fil_1,tab_fil_2,tab_fil_3,tab_fil_4),
+  tab_spanner = c("**Arachide**", "**Anacarde**","**Mangue**","**Riz**") 
+  ## intitulé des groupes de tableau associés
+)
+tab_crois
+
+
+
+```
+
+
+#### 2.2.3 Type de filière par région
+ Pour une vue assez bonne de la répartition on se limiter à l'analyse de la vriable region suivant les différentes filières. C'est de ça dont il est question dans ce   code :
+ 
+```{r}
+theme_gtsummary_compact(set_theme = TRUE, font_size = NULL)
+
+## Format de la sortie
+theme_gtsummary_printer(
+  print_engine = "flextable",  
+  #c("gt", "kable", "kable_extra", "flextable", "huxtable", "tibble"),
+  set_theme = TRUE
+)
+               # Créons le tableau 1 pour arachide
+
+tbl_1 <- projet %>%select(region,filiere_1) %>%
+  gtsummary::tbl_summary(
+    include = c(region,filiere_1),
+    by = filiere_1
+  ,label = list(region ~ "Région"))%>%
+  add_overall()%>%
+  bold_labels() %>%
+  italicize_levels()%>%modify_column_hide(c(stat_0,stat_1))
+
+               # Créons le tableau 2 pour anacharde
+
+tbl_2 <- projet %>%select(region,filiere_2) %>%
+  gtsummary::tbl_summary(
+    include = c(region,filiere_2),
+    by = filiere_2
+  ,label = list(region ~ "Région"))%>%
+  add_overall()%>%
+  bold_labels() %>%
+  italicize_levels()%>%modify_column_hide(c(stat_0,stat_1))
+
+               # Créons le tableau 3 pour mangue
+tbl_3 <- projet %>%select(region,filiere_3) %>%
+  gtsummary::tbl_summary(
+    include = c(region,filiere_3),
+    by = filiere_3
+  ,label = list(region ~ "Région"))%>%
+  add_overall()%>%
+  bold_labels() %>%
+  italicize_levels()%>%modify_column_hide(c(stat_0,stat_1))
+
+               # Créons le tableau 4 pour riz
+
+tbl_4 <- projet %>%select(region,filiere_4) %>%
+  gtsummary::tbl_summary(
+    include = c(region,filiere_4),
+    by = filiere_4
+  ,label = list(region ~ "Région"))%>%
+  add_overall()%>%
+  bold_labels() %>%
+  italicize_levels()%>%modify_column_hide(c(stat_0,stat_1))
+
+               #F les 4 tableaux ci-dessus en un seul tableau
+
+gtsummary::tbl_merge(
+  list(tbl_1,tbl_2,tbl_3,tbl_4),
+  tab_spanner =  c("Arachide", "Anacarde","Mangue","Riz") 
+  ## intitulé des groupes de tableau associés
+)
+```
+
+
+
+
+
+
+
+#### 2.2.4 Type de filière par Statut juridique
+
+de façon analogue à l'analyse de la Région, on peut analyser les filières en se trestreingant au statut juridique des PME dans le but d'apprécier  de façon pré-empirique le profil de statut juridique suivant chaque filière.
+
+```{r}
+theme_gtsummary_compact(set_theme = TRUE, font_size = NULL)
+
+## Format de la sortie
+theme_gtsummary_printer(
+  print_engine = "flextable",  
+  #c("gt", "kable", "kable_extra", "flextable", "huxtable", "tibble"),
+  set_theme = TRUE
+)
+               # Créons le tableau 1 pour arachide
+
+tbl_1 <- projet %>%select(q81,filiere_1) %>%
+  gtsummary::tbl_summary(
+    include = c(q81,filiere_1),
+    by = filiere_1
+  ,label = list(q81 ~ "STATUT JURIDIQUE"))%>%
+  add_overall()%>%
+  bold_labels() %>%
+  italicize_levels()%>%modify_column_hide(c(stat_0,stat_1))
+
+               # Créons le tableau 2 pour anacharde
+
+tbl_2 <- projet %>%select(q81,filiere_2) %>%
+  gtsummary::tbl_summary(
+    include = c(q81,filiere_2),
+    by = filiere_2
+  ,label = list(q81 ~ "STATUT JURIDIQUE"))%>%
+  add_overall()%>%
+  bold_labels() %>%
+  italicize_levels()%>%modify_column_hide(c(stat_0,stat_1))
+
+               # Créons le tableau 3 pour mangue
+tbl_3 <- projet %>%select(q81,filiere_3) %>%
+  gtsummary::tbl_summary(
+    include = c(q81,filiere_3),
+    by = filiere_3
+  ,label = list(q81 ~ "STATUT JURIDIQUE"))%>%
+  add_overall()%>%
+  bold_labels() %>%
+  italicize_levels()%>%modify_column_hide(c(stat_0,stat_1))
+
+               # Créons le tableau 4 pour riz
+
+tbl_4 <- projet %>%select(q81,filiere_4) %>%
+  gtsummary::tbl_summary(
+    include = c(q81,filiere_4),
+    by = filiere_4
+  ,label = list(q81~ "STATUT JURIDIQUE"))%>%
+  add_overall()%>%
+  bold_labels() %>%
+  italicize_levels()%>%modify_column_hide(c(stat_0,stat_1))
+
+               #Mergeons les 4 tableaux ci-dessus en un seul tableau
+
+gtsummary::tbl_merge(
+  list(tbl_1,tbl_2,tbl_3,tbl_4),
+  tab_spanner =  c("Arachide", "Anacarde","Mangue","Riz") 
+  ## intitulé des groupes de tableau associés
+)
+```
+
+
+
+### 2.2.5.  Manipulation sur les dates: Durée et Durée moyenne de l'entretien
+
+Cettr sectione est important en ce sens qu'il permet de manipuler le facteur temps dans notre base de données on peut en effet jouer ou consulter le temps pour apprécier certaines singularités dans une base de données.
+
+On peut alors commencer comme suite:
+```{r}
+#Calculer la durée de l’entretien et indiquer la durée moyenne de l’entretien 
+#                     par enquêteur.
+
+          #Créons d'abord la colonne durée de l'entretien
+
+projet <- projet %>%
+  mutate(duree_enquete = interval(today,submissiondate) %>% as.duration())
+
+#     Moyenne du temps d'un entretien
+
+vue_date <-projet %>% group_by(duree_enquete) %>% summarise(
+  Duree_Moyenne = mean(duree_enquete))
+print(head(vue_date))
+```
+
+
+
+### 2.2.6. Traitement sur les date
+
+Création des colonnes mois, jour, heure, minutes et temps mis avant de soumettre en minutes  donne un apperçu plus simplifié de l'agrégation du temps associé à la période d'enquête
+
+```{r}
+projet$submissiondate <- as.POSIXct(projet$submissiondate)
+
+# Ajouter les variables pour le jour, l'heure, la minute, le mois de l'entretien et la durée de l'entretien
+projet <- projet %>%
+  mutate( mois_entretien = format(submissiondate, "%m"),
+         jour_entretien = format(submissiondate, "%d"),
+         heure_entretien = format(submissiondate, "%H"),
+         minute_entretien = format(submissiondate, "%M"),
+         duree_entretien = as.numeric(difftime(submissiondate, start, units = "mins")))
+print(head(projet))
+```
+
+
+# ### 2.2.7.création de fonction d'extration conditionnée par une date 
+```{r}
+library(dplyr)
+
+extraire_soumissions_avant_date <- function(base, date_limite) {
+  # Convertir la variable submissiondate en un objet de date/heure
+  base$submissiondate <- as.POSIXct(base$submissiondate)
+  
+  # Extraire les soumissions avant la date limite
+  soumissions_avant_date <- base %>%
+    filter(submissiondate < date_limite)
+  
+  return(soumissions_avant_date)
+}
+```
+
+
+  Exemple d'utilisation de la fonction avec une date donnée (par exemple, le 05      juin 2023) dont je souligne que ça été pris de façon aléatoire. Dans une enquête, cette date ou toute autre autre date peut bien jouer un rôle  
+```{r}
+date_limite <- as.POSIXct("2021-06-05")
+soumissions_avant_date <- extraire_soumissions_avant_date(projet, date_limite)
+
+# Vérifier les soumissions extraites
+head(soumissions_avant_date)
+```
+
